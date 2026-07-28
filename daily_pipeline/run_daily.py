@@ -1,0 +1,44 @@
+"""Daily orchestrator: pull today's headlines, generate the news-brief video,
+and save it locally. Does NOT upload anywhere -- the finished .mp4 and its
+metadata .txt land in output/, and a Pending row is appended to tracker.csv
+for you to review before publishing manually.
+
+This is the script the daily scheduler (see setup_scheduler.py) runs.
+"""
+
+import logging
+import sys
+
+from config import LOGS_DIR
+from generate_video import generate_daily_video
+
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOGS_DIR / "run_daily.log", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger("run_daily")
+
+
+def main() -> int:
+    log.info("=== Daily finance/tech news brief: starting ===")
+    try:
+        result = generate_daily_video()
+    except Exception as err:
+        log.exception(f"Generation failed: {err}")
+        log.info("=== Daily run FAILED ===")
+        return 1
+
+    log.info(f"Video saved: {result['video_path']}")
+    log.info(f"Title: {result['title']}")
+    log.info("Row appended to tracker.csv with Status=Pending -- review and publish manually.")
+    log.info("=== Daily run completed successfully ===")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

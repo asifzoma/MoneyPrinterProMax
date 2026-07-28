@@ -18,3 +18,7 @@ main.py-oauth2.json
 Backend/output*
 Songs/
 venv/
+# daily_pipeline
+daily_pipeline/token.json
+daily_pipeline/tracker.csv
+daily_pipeline/logs/
