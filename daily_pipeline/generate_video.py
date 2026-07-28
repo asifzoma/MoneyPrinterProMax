@@ -30,7 +30,7 @@ def _post(path: str, payload: dict) -> dict:
 
 
 def _get(path: str) -> dict:
-    with urllib.request.urlopen(MP_API_BASE + path, timeout=30) as resp:
+    with urllib.request.urlopen(MP_API_BASE + path, timeout=60) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -40,7 +40,11 @@ def wait_for_job(job_id: str, poll_seconds: int = 10, max_wait_minutes: int = 45
     while True:
         try:
             job = _get(f"/api/jobs/{job_id}")["job"]
-        except urllib.error.URLError as err:
+        except (urllib.error.URLError, TimeoutError, OSError) as err:
+            # A busy backend under heavy CPU load (e.g. Ollama inference
+            # competing for cores) can occasionally take longer than the
+            # per-request timeout to answer a simple status check; treat
+            # that as transient and keep polling rather than aborting.
             print(f"  [!] Poll error: {err}; retrying...")
             time.sleep(poll_seconds)
             continue
