@@ -20,13 +20,25 @@ from config import DISCLAIMER, MP_API_BASE, OUTPUT_DIR
 from fetch_news import get_daily_topic
 
 
-def _post(path: str, payload: dict) -> dict:
+def _post(path: str, payload: dict, retries: int = 3) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         MP_API_BASE + path, data=data, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, OSError) as err:
+            # A CPU-starved host (e.g. Docker + a local LLM competing for
+            # cores) can occasionally stall even this trivial "enqueue a
+            # job" call; retry a few times before giving up.
+            last_err = err
+            if attempt < retries:
+                print(f"  [!] POST {path} attempt {attempt} failed ({err}); retrying...")
+                time.sleep(5)
+    raise last_err
 
 
 def _get(path: str) -> dict:
@@ -112,7 +124,7 @@ def generate_daily_video(
     print(f"\n[2/4] Queuing job to {MP_API_BASE} (aspect {aspect_ratio}, min {min_duration}s)...")
     try:
         resp = _post("/api/generate", payload)
-    except urllib.error.URLError as err:
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
         raise ConnectionError(
             f"Could not reach MoneyPrinterProMax API at {MP_API_BASE}: {err}. "
             f"Is the backend running? (docker compose ps)"
