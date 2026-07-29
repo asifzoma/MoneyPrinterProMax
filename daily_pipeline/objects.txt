@@ -1,0 +1,49 @@
+# Hidden-histories-of-objects rotation list.
+# One object per line -- must match (or closely match) an English Wikipedia
+# article title, since fetch_topic.py grounds each script in that article's
+# summary to avoid the LLM inventing facts from scratch.
+# Blank lines and lines starting with '#' are ignored.
+
+Zipper
+Bubble wrap
+Post-it note
+WD-40
+Velcro
+QWERTY
+Traffic cone
+Shopping cart
+Rubber duck
+Paper clip
+Safety pin
+Aluminium foil
+Fortune cookie
+Slinky
+Frisbee
+Bubble gum
+Ballpoint pen
+Stapler
+Umbrella
+Zamboni
+Microwave oven
+Polytetrafluoroethylene
+Cyanoacrylate
+Silly Putty
+Etch A Sketch
+Rubik's Cube
+Trampoline
+Eraser
+Match
+Ziploc
+Traffic light
+Barcode
+QR code
+Credit card
+Vending machine
+Escalator
+Muzak
+Spirit level
+Corkscrew
+Can opener
+Safety razor
+Toothbrush
+Rubber band

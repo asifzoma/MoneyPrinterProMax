@@ -1,7 +1,7 @@
-"""Daily orchestrator: pull today's headlines, generate the news-brief video,
-and save it locally. Does NOT upload anywhere -- the finished .mp4 and its
-metadata .txt land in output/, and a Pending row is appended to tracker.csv
-for you to review before publishing manually.
+"""Daily orchestrator: pick today's object, generate the hidden-history
+video, and save it locally. Does NOT upload anywhere -- the finished .mp4
+and its metadata .txt land in output/, and a Pending row is appended to
+tracker.csv for you to review before publishing manually.
 
 This is the script the daily scheduler (see setup_scheduler.py) runs.
 """
@@ -25,7 +25,7 @@ log = logging.getLogger("run_daily")
 
 
 def main() -> int:
-    log.info("=== Daily finance/tech news brief: starting ===")
+    log.info("=== Daily hidden-histories-of-objects video: starting ===")
     try:
         result = generate_daily_video()
     except Exception as err:

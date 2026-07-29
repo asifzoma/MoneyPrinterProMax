@@ -1,4 +1,4 @@
-"""Shared paths and constants for the daily finance/tech news brief pipeline."""
+"""Shared paths and constants for the daily "hidden histories of objects" pipeline."""
 
 import os
 from pathlib import Path
@@ -28,24 +28,19 @@ YOUTUBE_CLIENT_SECRETS_FILE = PIPELINE_DIR / "client_secret.json"
 YOUTUBE_TOKEN_FILE = PIPELINE_DIR / "token.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
-# RSS feeds for the daily headline pull. Reuters shut down its public RSS feeds
-# in 2020, so we use sources confirmed live: CNBC (Finance + Technology
-# sections) for market-moving news, plus TechCrunch for tech-industry stories.
-# All three require no API key and have no rate limits to manage.
-RSS_FEEDS = [
-    "https://www.cnbc.com/id/10001147/device/rss/rss.html",  # CNBC Finance
-    "https://www.cnbc.com/id/19854910/device/rss/rss.html",  # CNBC Technology
-    "https://techcrunch.com/feed/",  # TechCrunch
-]
-HEADLINE_COUNT = 4  # how many headlines to fold into a single day's script (3-5 requested)
+# Rotation list of everyday objects for the "hidden histories" topic source.
+# fetch_topic.py grounds each day's script in the object's real Wikipedia
+# summary (rather than letting the LLM invent "facts" from scratch) --
+# accuracy matters more in this niche since a wrong claim gets caught fast.
+OBJECTS_FILE = PIPELINE_DIR / "objects.txt"
+OBJECTS_STATE_FILE = PIPELINE_DIR / ".objects_state.json"
+WIKIPEDIA_USER_AGENT = "MoneyPrinterProMax-DailyPipeline/1.0 (personal project; no contact)"
 
 DISCLAIMER = (
-    "\n\nDisclaimer: This video is AI-generated commentary for educational and "
-    "informational purposes only. It summarizes publicly reported news headlines "
-    "and is not financial advice, a recommendation to buy or sell any security, "
-    "or a substitute for professional financial guidance. Do your own research "
-    "before making any investment decisions."
+    "\n\nThis video is AI-narrated and grounded in the linked object's "
+    "Wikipedia summary, simplified for a short-form audience -- always a good "
+    "idea to check the source article if you want the full story."
 )
 
 YOUTUBE_PRIVACY_STATUS = os.environ.get("MP_YOUTUBE_PRIVACY", "unlisted")
-YOUTUBE_CATEGORY_ID = os.environ.get("MP_YOUTUBE_CATEGORY_ID", "25")  # News & Politics
+YOUTUBE_CATEGORY_ID = os.environ.get("MP_YOUTUBE_CATEGORY_ID", "27")  # Education

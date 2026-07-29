@@ -1,8 +1,8 @@
-"""Generate today's finance/tech news brief video via the MoneyPrinterProMax API.
+"""Generate today's "hidden histories of objects" video via the MoneyPrinterProMax API.
 
-Pulls headlines, queues a 9:16 job with a 60s minimum duration, waits for the
-render, locates the output .mp4 + metadata .txt, and appends a Pending row to
-the local CSV tracker.
+Picks today's object, queues a 9:16 job with a 60s minimum duration, waits
+for the render, locates the output .mp4 + metadata .txt, and appends a
+Pending row to the local CSV tracker.
 """
 
 import argparse
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import tracker
 from config import DISCLAIMER, MP_API_BASE, OUTPUT_DIR
-from fetch_news import get_daily_topic
+from fetch_topic import get_daily_topic
 
 
 def _post(path: str, payload: dict, retries: int = 3) -> dict:
@@ -105,10 +105,9 @@ def generate_daily_video(
 ) -> dict:
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
-    print("[1/4] Fetching today's headlines...")
-    topic, headlines = get_daily_topic()
-    for h in headlines:
-        print(f"  - [{h['source']}] {h['title']}")
+    print("[1/4] Picking today's object...")
+    topic, meta = get_daily_topic()
+    print(f"  - {meta['object']} ({meta['wikipedia_url']})")
 
     payload = {
         "videoSubject": topic,
@@ -183,7 +182,7 @@ def generate_daily_video(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate today's finance/tech news brief video.")
+    parser = argparse.ArgumentParser(description="Generate today's hidden-histories-of-objects video.")
     parser.add_argument("--model", default=None, help="Ollama model (default: $MP_OLLAMA_MODEL or llama3.1:8b)")
     parser.add_argument("--voice", default="en_us_001")
     parser.add_argument("--threads", type=int, default=6)
