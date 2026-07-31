@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 
 import requests
@@ -10,6 +11,7 @@ from pathlib import Path
 from moviepy import (
     AudioFileClip,
     CompositeVideoClip,
+    ImageClip,
     TextClip,
     VideoFileClip,
     concatenate_videoclips,
@@ -23,6 +25,11 @@ load_dotenv(ENV_FILE)
 
 ASSEMBLY_AI_API_KEY = os.getenv("ASSEMBLY_AI_API_KEY")
 FRAME_EPSILON = 1 / 120
+
+# Wikimedia requires a descriptive User-Agent on every request, including
+# raw file downloads from upload.wikimedia.org -- omitting it gets a 429
+# HTML error page back instead of the image (see commons_search.py).
+_WIKIMEDIA_USER_AGENT = "MoneyPrinterProMax/1.0 (personal project; no contact)"
 
 
 def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
@@ -44,6 +51,123 @@ def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
         f.write(requests.get(video_url).content)
 
     return str(video_path)
+
+
+def download_image(image_url: str, directory: str = str(TEMP_DIR), retries: int = 5) -> str:
+    """
+    Downloads an image (e.g. a Wikimedia Commons file) and returns the local path.
+
+    Args:
+        image_url (str): The URL of the image to download.
+        directory (str): The temporary directory to save the image to.
+        retries (int): Retry attempts on transient errors (Wikimedia rate-limits hard).
+
+    Returns:
+        str: The path to the saved image.
+    """
+    destination = Path(directory).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    suffix = Path(image_url.split("?")[0]).suffix or ".jpg"
+    image_path = destination / f"{uuid.uuid4()}{suffix}"
+
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(
+                image_url, headers={"User-Agent": _WIKIMEDIA_USER_AGENT}, timeout=30
+            )
+            if resp.status_code == 429:
+                retry_after = float(resp.headers.get("Retry-After", 10))
+                last_err = requests.HTTPError(f"429 Too Many Requests (retry-after={retry_after}s)")
+                if attempt < retries:
+                    time.sleep(retry_after + 1)
+                continue
+            resp.raise_for_status()
+            image_path.write_bytes(resp.content)
+            return str(image_path)
+        except requests.RequestException as err:
+            last_err = err
+            if attempt < retries:
+                time.sleep(5 * attempt)
+    raise RuntimeError(f"Could not download image {image_url}: {last_err}")
+
+
+def image_to_kenburns_clip(
+    image_path: str,
+    duration: float,
+    target_width: int = 1080,
+    target_height: int = 1920,
+    zoom_start: float = 1.0,
+    zoom_end: float = 1.15,
+) -> str:
+    """
+    Renders a still image into a short local video clip with a slow
+    zoom (Ken Burns effect), center-cropped to the target aspect ratio so it
+    slots into combine_videos()'s existing video_paths list unchanged.
+
+    Args:
+        image_path (str): Local path to the source image.
+        duration (float): Clip duration in seconds.
+        target_width (int): Target frame width.
+        target_height (int): Target frame height.
+        zoom_start (float): Scale factor at the start of the clip.
+        zoom_end (float): Scale factor at the end of the clip (> zoom_start to zoom in).
+
+    Returns:
+        str: The path to the rendered clip.
+    """
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TEMP_DIR / f"{uuid.uuid4()}_kenburns.mp4"
+
+    image_clip = ImageClip(image_path).with_duration(duration)
+    img_w, img_h = image_clip.size
+    target_ratio = target_width / target_height
+
+    # Center-crop to the target aspect ratio first (same math as
+    # combine_videos' video-clip cropping), then zoom/pan within that crop.
+    if round(img_w / img_h, 4) < target_ratio:
+        crop_w, crop_h = img_w, round(img_w / target_ratio)
+    else:
+        crop_w, crop_h = round(target_ratio * img_h), img_h
+    cropped = image_clip.cropped(
+        width=crop_w, height=crop_h, x_center=img_w / 2, y_center=img_h / 2
+    )
+
+    def _scale_at(t: float) -> float:
+        progress = (t / duration) if duration > 0 else 0
+        return zoom_start + (zoom_end - zoom_start) * progress
+
+    animated = cropped.resized(_scale_at)
+
+    # Resize grows the frame from its top-left corner, so re-center it on
+    # every frame within the fixed-size composite canvas below (otherwise
+    # the image visibly drifts toward the bottom-right as it zooms).
+    def _position_at(t: float):
+        scale = _scale_at(t)
+        cur_w, cur_h = crop_w * scale, crop_h * scale
+        return ((target_width - cur_w) / 2, (target_height - cur_h) / 2)
+
+    positioned = animated.with_position(_position_at)
+    composed = CompositeVideoClip([positioned], size=(target_width, target_height))
+    composed = composed.with_fps(30).with_duration(duration)
+
+    try:
+        composed.write_videofile(
+            str(output_path),
+            threads=2,
+            fps=30,
+            codec="libx264",
+            preset="medium",
+            audio=False,
+            logger=None,
+        )
+    finally:
+        composed.close()
+        animated.close()
+        cropped.close()
+        image_clip.close()
+
+    return str(output_path)
 
 
 def __generate_subtitles_assemblyai(audio_path: str, voice: str) -> str:

@@ -19,8 +19,19 @@ TRACKER_COLUMNS = [
     "Status",
 ]
 
-# MoneyPrinterProMax backend API (Docker: http://localhost:8080, see docker-compose.yml)
-MP_API_BASE = os.environ.get("MP_API_BASE", "http://localhost:8080").rstrip("/")
+# We reuse specific Flask-independent modules from Backend/ directly (script
+# generation, TTS, Commons image search) rather than going through
+# MoneyPrinterProMax's Flask API/job queue -- that machinery exists to
+# support its multi-user web UI, which this single-video-a-day pipeline
+# doesn't need. No Docker, no Postgres, no separate worker process.
+BACKEND_DIR = REPO_ROOT / "Backend"
+
+# Remotion handles final video assembly (Ken Burns pans, animated captions) --
+# see daily_pipeline/remotion/. Assets must live under its public/ folder;
+# Remotion only serves files from there, not arbitrary absolute paths.
+REMOTION_DIR = PIPELINE_DIR / "remotion"
+REMOTION_TMP_DIR = REMOTION_DIR / "public" / "tmp"
+REMOTION_FPS = 30
 
 # YouTube OAuth. Place your own downloaded OAuth client (Desktop app type) here;
 # the token cache is created after the first interactive authorization.

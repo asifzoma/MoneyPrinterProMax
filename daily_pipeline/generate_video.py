@@ -1,183 +1,290 @@
-"""Generate today's "hidden histories of objects" video via the MoneyPrinterProMax API.
+"""Generate today's "hidden histories of objects" video via Remotion.
 
-Picks today's object, queues a 9:16 job with a 60s minimum duration, waits
-for the render, locates the output .mp4 + metadata .txt, and appends a
-Pending row to the local CSV tracker.
+Orchestrates: fetch_topic (object + Wikipedia grounding) -> Ollama script/
+metadata/hashtags (Backend/gpt.py, called directly) -> TikTok TTS narration
+(Backend/tiktokvoice.py) -> Wikimedia Commons images (Backend/
+commons_search.py) -> Remotion render (daily_pipeline/remotion/) ->
+output/ + tracker.csv.
+
+No Flask, no job queue, no Docker -- that machinery exists to support
+MoneyPrinterProMax's multi-user web UI, which this single-video-a-day
+pipeline doesn't need. Backend/gpt.py, tiktokvoice.py, commons_search.py,
+and video.py's download_image() are all Flask-independent, so we import
+them directly.
 """
 
 import argparse
+import glob
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import tracker
-from config import DISCLAIMER, MP_API_BASE, OUTPUT_DIR
+from config import (
+    BACKEND_DIR,
+    DISCLAIMER,
+    OUTPUT_DIR,
+    PIPELINE_DIR,
+    REMOTION_DIR,
+    REMOTION_FPS,
+    REMOTION_TMP_DIR,
+)
 from fetch_topic import get_daily_topic
 
+sys.path.insert(0, str(BACKEND_DIR))
+from commons_search import search_for_commons_images  # noqa: E402
+from gpt import generate_hashtags, generate_metadata, generate_script, get_search_terms  # noqa: E402
+from tiktokvoice import tts  # noqa: E402
+from video import download_image  # noqa: E402
 
-def _post(path: str, payload: dict, retries: int = 3) -> dict:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        MP_API_BASE + path, data=data, headers={"Content-Type": "application/json"}
+
+def _find_binary(name: str, glob_patterns: list[str]) -> str:
+    found = shutil.which(name)
+    if found:
+        return found
+    for pattern in glob_patterns:
+        matches = glob.glob(os.path.expandvars(pattern))
+        if matches:
+            return matches[0]
+    raise RuntimeError(f"`{name}` not found on PATH or in known install locations.")
+
+
+def _ffmpeg() -> str:
+    return _find_binary(
+        "ffmpeg",
+        [r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffmpeg.exe"],
     )
-    last_err = None
-    for attempt in range(1, retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError) as err:
-            # A CPU-starved host (e.g. Docker + a local LLM competing for
-            # cores) can occasionally stall even this trivial "enqueue a
-            # job" call; retry a few times before giving up.
-            last_err = err
-            if attempt < retries:
-                print(f"  [!] POST {path} attempt {attempt} failed ({err}); retrying...")
-                time.sleep(5)
-    raise last_err
 
 
-def _get(path: str) -> dict:
-    with urllib.request.urlopen(MP_API_BASE + path, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def _ffprobe() -> str:
+    return _find_binary(
+        "ffprobe",
+        [r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffprobe.exe"],
+    )
 
 
-def wait_for_job(job_id: str, poll_seconds: int = 10, max_wait_minutes: int = 45) -> dict:
-    """Block until the job reaches a terminal state, or raise after max_wait_minutes."""
-    deadline = time.monotonic() + max_wait_minutes * 60
-    while True:
-        try:
-            job = _get(f"/api/jobs/{job_id}")["job"]
-        except (urllib.error.URLError, TimeoutError, OSError) as err:
-            # A busy backend under heavy CPU load (e.g. Ollama inference
-            # competing for cores) can occasionally take longer than the
-            # per-request timeout to answer a simple status check; treat
-            # that as transient and keep polling rather than aborting.
-            print(f"  [!] Poll error: {err}; retrying...")
-            time.sleep(poll_seconds)
-            continue
-
-        state = job.get("state")
-        if state in ("completed", "failed", "cancelled"):
-            return job
-
-        if time.monotonic() > deadline:
-            raise TimeoutError(
-                f"Job {job_id} did not finish within {max_wait_minutes} minutes "
-                f"(last state: {state})."
-            )
-        time.sleep(poll_seconds)
+def _remotion_cli() -> str:
+    ext = ".cmd" if sys.platform == "win32" else ""
+    cli = REMOTION_DIR / "node_modules" / ".bin" / f"remotion{ext}"
+    if not cli.exists():
+        raise RuntimeError(
+            f"Remotion CLI not found at {cli}. Run `npm install` in {REMOTION_DIR} first."
+        )
+    return str(cli)
 
 
-def parse_metadata_txt(text: str) -> dict:
-    """Parse the fixed TITLE/DESCRIPTION/HASHTAGS/KEYWORDS sidecar format
-    written by Backend/pipeline.py's run_generation_pipeline()."""
+def _audio_duration_seconds(path: Path) -> float:
+    result = subprocess.run(
+        [_ffprobe(), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return float(result.stdout.strip())
 
-    def section(label: str) -> str:
-        pattern = rf"^{re.escape(label)}\n(.*?)(?=\n\n[A-Z][A-Z /]*\n|\Z)"
-        m = re.search(pattern, text, re.S | re.M)
-        return m.group(1).strip() if m else ""
 
-    title = section("TITLE")
-    hashtags = section("HASHTAGS")
-    keywords = section("KEYWORDS / TAGS")
-    description = section("DESCRIPTION")
-    # The sidecar repeats the hashtags line once, glued to the end of the
-    # description block with no header -- strip that duplicate back off.
-    if hashtags and description.endswith(hashtags):
-        description = description[: -len(hashtags)].rstrip()
-
-    return {"title": title, "description": description, "hashtags": hashtags, "keywords": keywords}
+def _concat_audio(mp3_paths: list[Path], output_path: Path) -> None:
+    list_file = output_path.with_suffix(".txt")
+    list_file.write_text(
+        "\n".join(f"file '{p.resolve().as_posix()}'" for p in mp3_paths), encoding="utf-8"
+    )
+    subprocess.run(
+        [_ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(output_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    list_file.unlink(missing_ok=True)
 
 
 def generate_daily_video(
     ai_model: str = None,
     voice: str = "en_us_001",
-    threads: int = 6,
     min_duration: int = 60,
-    aspect_ratio: str = "9:16",
-    poll_seconds: int = 10,
-    max_wait_minutes: int = 45,
+    max_images: int = 5,
 ) -> dict:
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
-    print("[1/4] Picking today's object...")
+    print("[1/6] Picking today's object...")
     topic, meta = get_daily_topic()
     print(f"  - {meta['object']} ({meta['wikipedia_url']})")
 
-    payload = {
-        "videoSubject": topic,
-        "aiModel": ai_model,
-        "voice": voice,
-        "paragraphNumber": 4,
-        "aspectRatio": aspect_ratio,
-        "minDuration": min_duration,
-        "threads": threads,
-        "customPrompt": "",
+    print("\n[2/6] Generating script...")
+    # Same min-duration word-count-targeting approach MoneyPrinterProMax's
+    # pipeline.py used: TikTok TTS speaks ~2.4 words/sec.
+    words_per_second = 2.4
+    accept_words = int(min_duration * words_per_second)
+    target_words = int(accept_words * 1.2)
+    max_words = int(accept_words * 1.6)
+    script = None
+    for attempt in range(1, 4):
+        script = generate_script(topic, 4, ai_model, voice, "", min_words=target_words)
+        word_count = len((script or "").split())
+        if script and word_count >= accept_words:
+            print(f"  script is {word_count} words (~{round(word_count / words_per_second)}s)")
+            break
+        print(f"  script was {word_count} words; need ~{accept_words}, retrying ({attempt}/3)...")
+        target_words = int(target_words * 1.5)
+
+    if not script:
+        raise RuntimeError("Could not generate a script. Try a different model.")
+
+    if len(script.split()) > max_words:
+        kept, used = [], 0
+        for sentence in re.split(r"(?<=[.!?])\s+", script.strip()):
+            words_in = len(sentence.split())
+            if used + words_in > max_words and kept:
+                break
+            kept.append(sentence)
+            used += words_in
+        script = " ".join(kept)
+
+    print("\n[3/6] Finding Wikimedia Commons images...")
+    llm_search_terms = get_search_terms(topic, max_images, script, ai_model)
+    # The object's own Wikipedia title is guaranteed to resolve to a real,
+    # on-topic article (that's what grounded the script) -- try it first,
+    # since the LLM's generated search terms are sometimes too narrative
+    # ("Percy Spencer Experiment") to match anything on Commons at all.
+    search_terms = [meta["wikipedia_title"]] + [
+        t for t in llm_search_terms if t.lower() != meta["wikipedia_title"].lower()
+    ]
+    image_candidates = []
+    seen_titles = set()
+    for i, term in enumerate(search_terms):
+        if i > 0:
+            time.sleep(1.5)  # pace requests so bursts don't trip Wikimedia's rate limiter
+        found = search_for_commons_images(term, 3)
+        for image in found:
+            if image["title"] not in seen_titles:
+                seen_titles.add(image["title"])
+                image_candidates.append(image)
+                break
+    if not image_candidates:
+        raise RuntimeError("No usable Wikimedia Commons images found.")
+
+    REMOTION_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    for old in REMOTION_TMP_DIR.glob("*"):
+        old.unlink()
+
+    image_rel_paths = []
+    image_credits = []
+    for i, image in enumerate(image_candidates):
+        if i > 0:
+            time.sleep(2)  # pace downloads so bursts don't trip Wikimedia's rate limiter
+        try:
+            local_path = download_image(image["url"])
+            suffix = Path(local_path).suffix or ".jpg"
+            dest_name = f"img{i}{suffix}"
+            shutil.copy2(local_path, REMOTION_TMP_DIR / dest_name)
+            image_rel_paths.append(f"tmp/{dest_name}")
+            image_credits.append(image)
+        except Exception as err:
+            print(f"  [!] could not process image {image['url']}: {err}")
+
+    if not image_rel_paths:
+        raise RuntimeError("Could not download any Wikimedia Commons images.")
+    print(f"  {len(image_rel_paths)} image(s) ready")
+
+    print("\n[4/6] Generating narration (TikTok TTS)...")
+    sentences = [s for s in script.split(". ") if s]
+    tts_tmp_dir = PIPELINE_DIR / "temp"
+    tts_tmp_dir.mkdir(parents=True, exist_ok=True)
+    for old in tts_tmp_dir.glob("*.mp3"):
+        old.unlink()
+
+    sentence_paths = []
+    for i, sentence in enumerate(sentences):
+        path = tts_tmp_dir / f"sentence_{i}.mp3"
+        tts(sentence, voice, filename=str(path))
+        sentence_paths.append(path)
+
+    captions = []
+    cursor_seconds = 0.0
+    for sentence, path in zip(sentences, sentence_paths):
+        duration = _audio_duration_seconds(path)
+        start_frame = round(cursor_seconds * REMOTION_FPS)
+        cursor_seconds += duration
+        end_frame = round(cursor_seconds * REMOTION_FPS)
+        captions.append({"text": sentence.strip(), "startFrame": start_frame, "endFrame": end_frame})
+
+    narration_path = REMOTION_TMP_DIR / "narration.mp3"
+    _concat_audio(sentence_paths, narration_path)
+    print(f"  narration is {cursor_seconds:.1f}s across {len(captions)} caption(s)")
+
+    print("\n[5/6] Generating metadata...")
+    title, description, keywords = generate_metadata(topic, script, ai_model)
+    hashtags = generate_hashtags(topic, script, ai_model)
+    description_with_disclaimer = description + DISCLAIMER
+    if image_credits:
+        credits_lines = "\n".join(
+            f"{c['artist']} ({c['license']}) - {c['source_page']}" for c in image_credits
+        )
+        description_with_disclaimer += f"\n\nImage credits:\n{credits_lines}"
+
+    print("\n[6/6] Rendering with Remotion...")
+    props = {
+        "title": title,
+        "imagePaths": image_rel_paths,
+        "audioPath": "tmp/narration.mp3",
+        "captions": captions,
     }
+    props_path = REMOTION_TMP_DIR / "props.json"
+    props_path.write_text(json.dumps(props), encoding="utf-8")
 
-    print(f"\n[2/4] Queuing job to {MP_API_BASE} (aspect {aspect_ratio}, min {min_duration}s)...")
-    try:
-        resp = _post("/api/generate", payload)
-    except (urllib.error.URLError, TimeoutError, OSError) as err:
-        raise ConnectionError(
-            f"Could not reach MoneyPrinterProMax API at {MP_API_BASE}: {err}. "
-            f"Is the backend running? (docker compose ps)"
-        ) from err
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:60]
+    saved_name = f"{slug or 'video'}-{uuid.uuid4().hex[:8]}.mp4"
+    saved_path = OUTPUT_DIR / saved_name
 
-    job_id = resp.get("jobId")
-    if not job_id:
-        raise RuntimeError(f"API did not return a jobId: {resp}")
-    print(f"  queued -> job {job_id}")
+    subprocess.run(
+        [
+            _remotion_cli(),
+            "render",
+            "src/index.ts",
+            "HiddenHistory",
+            str(saved_path),
+            f"--props={props_path}",
+        ],
+        cwd=str(REMOTION_DIR),
+        check=True,
+    )
+    print(f"  saved to output/{saved_name}")
 
-    print(f"\n[3/4] Waiting for render (polling every {poll_seconds}s, timeout {max_wait_minutes}m)...")
-    job = wait_for_job(job_id, poll_seconds=poll_seconds, max_wait_minutes=max_wait_minutes)
-
-    if job.get("state") != "completed":
-        raise RuntimeError(f"Job {job_id} ended in state '{job.get('state')}': {job.get('errorMessage')}")
-
-    result_path = job.get("resultPath")
-    if not result_path:
-        raise RuntimeError(f"Job {job_id} completed but returned no resultPath.")
-
-    print(f"  done -> {result_path}")
-
-    print("\n[4/4] Locating output files and updating tracker...")
-    from config import REPO_ROOT
-
-    video_path = (REPO_ROOT / result_path).resolve()
-    txt_path = video_path.with_suffix(".txt")
-
-    if not video_path.exists():
-        raise FileNotFoundError(f"Expected video not found: {video_path}")
-    if not txt_path.exists():
-        raise FileNotFoundError(f"Expected metadata sidecar not found: {txt_path}")
-
-    metadata = parse_metadata_txt(txt_path.read_text(encoding="utf-8"))
-    description_with_disclaimer = metadata["description"] + DISCLAIMER
+    hashtags_line = " ".join(hashtags)
+    sidecar_text = (
+        f"TITLE\n{title}\n\n"
+        f"DESCRIPTION\n{description_with_disclaimer}\n\n"
+        f"HASHTAGS\n{hashtags_line}\n\n"
+        f"KEYWORDS / TAGS\n{', '.join(keywords)}\n"
+    )
+    sidecar_name = saved_name.rsplit(".", 1)[0] + ".txt"
+    (OUTPUT_DIR / sidecar_name).write_text(sidecar_text, encoding="utf-8")
 
     today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
     tracker.append_row(
         date=today,
-        video_filename=video_path.name,
-        title=metadata["title"],
+        video_filename=saved_name,
+        title=title,
         description=description_with_disclaimer,
-        hashtags=metadata["hashtags"],
+        hashtags=hashtags_line,
         youtube_url="",
         status="Pending",
     )
-    print(f"  tracker row appended for {video_path.name}")
+    print(f"  tracker row appended for {saved_name}")
 
     return {
-        "video_path": str(video_path),
-        "txt_path": str(txt_path),
-        "title": metadata["title"],
+        "video_path": str(saved_path),
+        "txt_path": str(OUTPUT_DIR / sidecar_name),
+        "title": title,
         "description": description_with_disclaimer,
-        "hashtags": metadata["hashtags"],
+        "hashtags": hashtags_line,
     }
 
 
@@ -185,21 +292,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate today's hidden-histories-of-objects video.")
     parser.add_argument("--model", default=None, help="Ollama model (default: $MP_OLLAMA_MODEL or llama3.1:8b)")
     parser.add_argument("--voice", default="en_us_001")
-    parser.add_argument("--threads", type=int, default=6)
     parser.add_argument("--min-duration", type=int, default=60)
-    parser.add_argument("--aspect", default="9:16")
-    parser.add_argument("--max-wait-minutes", type=int, default=45)
     args = parser.parse_args()
 
     try:
-        result = generate_daily_video(
-            ai_model=args.model,
-            voice=args.voice,
-            threads=args.threads,
-            min_duration=args.min_duration,
-            aspect_ratio=args.aspect,
-            max_wait_minutes=args.max_wait_minutes,
-        )
+        result = generate_daily_video(ai_model=args.model, voice=args.voice, min_duration=args.min_duration)
     except Exception as err:
         print(f"\n[FAILED] {err}", file=sys.stderr)
         sys.exit(1)

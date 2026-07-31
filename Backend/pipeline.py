@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 from apiclient.errors import HttpError
 from moviepy import (
@@ -13,6 +14,7 @@ from moviepy import (
 )
 from uuid import uuid4
 
+from commons_search import search_for_commons_images
 from gpt import (
     generate_hashtags,
     generate_metadata,
@@ -20,7 +22,6 @@ from gpt import (
     get_search_terms,
 )
 from logstream import log
-from search import search_for_stock_videos
 from tiktokvoice import tts
 from utils import (
     BASE_DIR,
@@ -31,7 +32,13 @@ from utils import (
     TEMP_DIR,
     choose_random_song,
 )
-from video import combine_videos, generate_subtitles, generate_video, save_video
+from video import (
+    combine_videos,
+    download_image,
+    generate_subtitles,
+    generate_video,
+    image_to_kenburns_clip,
+)
 from youtube import upload_video
 
 
@@ -60,14 +67,14 @@ def run_generation_pipeline(
     subtitles_position = data.get("subtitlesPosition") or "center,bottom"
     text_color = data.get("color") or "#FFFF00"
 
-    # Aspect ratio -> (width, height, Pexels orientation). Default 9:16 vertical.
+    # Aspect ratio -> (width, height). Default 9:16 vertical.
     aspect_presets = {
-        "9:16": (1080, 1920, "portrait"),
-        "16:9": (1920, 1080, "landscape"),
-        "1:1": (1080, 1080, "square"),
-        "4:5": (1080, 1350, "portrait"),
+        "9:16": (1080, 1920),
+        "16:9": (1920, 1080),
+        "1:1": (1080, 1080),
+        "4:5": (1080, 1350),
     }
-    target_width, target_height, orientation = aspect_presets.get(
+    target_width, target_height = aspect_presets.get(
         data.get("aspectRatio") or "9:16", aspect_presets["9:16"]
     )
     use_music = data.get("useMusic", False)
@@ -157,35 +164,50 @@ def run_generation_pipeline(
         data["videoSubject"], amount_of_stock_videos, script, ai_model
     )
 
-    video_urls = []
-    it = 15
-    min_dur = 10
+    # Wikimedia Commons images (grounded in the object's own Wikipedia article
+    # when a search term happens to match one, falling back to a generic
+    # Commons keyword search otherwise -- see commons_search.py) rendered as
+    # short Ken Burns clips, instead of generic Pexels stock footage.
+    clip_duration = 5  # matches the max_clip_duration passed to combine_videos below
+    image_candidates = []
+    seen_titles = set()
 
-    for search_term in search_terms:
+    for i, search_term in enumerate(search_terms):
         guard_cancelled()
-        found_urls = search_for_stock_videos(
-            search_term, os.getenv("PEXELS_API_KEY"), it, min_dur, orientation
-        )
-        for url in found_urls:
-            if url not in video_urls:
-                video_urls.append(url)
+        if i > 0:
+            time.sleep(1.5)  # pace requests so bursts don't trip Wikimedia's rate limiter
+        found_images = search_for_commons_images(search_term, 3)
+        for image in found_images:
+            if image["title"] not in seen_titles:
+                seen_titles.add(image["title"])
+                image_candidates.append(image)
                 break
 
-    if not video_urls:
-        raise RuntimeError("No videos found to download.")
+    if not image_candidates:
+        raise RuntimeError("No usable Wikimedia Commons images found.")
 
     video_paths = []
-    emit(f"[+] Downloading {len(video_urls)} videos...", "info")
+    image_credits = []
+    emit(f"[+] Downloading {len(image_candidates)} images...", "info")
 
-    for video_url in video_urls:
+    for i, image in enumerate(image_candidates):
         guard_cancelled()
+        if i > 0:
+            time.sleep(2)  # pace downloads so bursts don't trip Wikimedia's rate limiter
         try:
-            saved_video_path = save_video(video_url)
-            video_paths.append(saved_video_path)
-        except Exception:
-            emit(f"[-] Could not download video: {video_url}", "error")
+            local_image_path = download_image(image["url"])
+            clip_path = image_to_kenburns_clip(
+                local_image_path, clip_duration, target_width, target_height
+            )
+            video_paths.append(clip_path)
+            image_credits.append(image)
+        except Exception as err:
+            emit(f"[-] Could not process image {image['url']}: {err}", "error")
 
-    emit("[+] Videos downloaded!", "success")
+    if not video_paths:
+        raise RuntimeError("Could not render any Ken Burns clips from Commons images.")
+
+    emit("[+] Images downloaded and animated!", "success")
     emit("[+] Script generated!", "success")
 
     guard_cancelled()
@@ -439,12 +461,16 @@ def run_generation_pipeline(
 
         # Write a copy-paste-ready metadata sidecar next to the video.
         hashtags_line = " ".join(hashtags)
+        credits_lines = "\n".join(
+            f"{c['artist']} ({c['license']}) - {c['source_page']}" for c in image_credits
+        )
         sidecar_name = saved_name.rsplit(".", 1)[0] + ".txt"
         sidecar_text = (
             f"TITLE\n{title}\n\n"
             f"DESCRIPTION\n{description}\n\n{hashtags_line}\n\n"
             f"HASHTAGS\n{hashtags_line}\n\n"
-            f"KEYWORDS / TAGS\n{', '.join(keywords)}\n"
+            f"KEYWORDS / TAGS\n{', '.join(keywords)}\n\n"
+            f"PHOTO CREDITS\n{credits_lines}\n"
         )
         (OUTPUT_DIR / sidecar_name).write_text(sidecar_text, encoding="utf-8")
         emit(f"[+] Saved metadata to output/{sidecar_name}", "success")
