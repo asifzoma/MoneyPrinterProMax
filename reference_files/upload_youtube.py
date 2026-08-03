@@ -147,7 +147,7 @@ def upload_captions(youtube, video_id: str, srt_path) -> None:
                     "isDraft": False,
                 }
             },
-            media_body=MediaFileUpload(str(srt_path), mimetype="application/x-subrip", resumable=False),
+            media_body=MediaFileUpload(str(srt_path), mimetype="text/vtt", resumable=False),
         ).execute()
         log.info(f"  captions uploaded from {srt_path.name}")
     except HttpError as err:

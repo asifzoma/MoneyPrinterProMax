@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import tracker
+from srt_export import write_srt
 from config import (
     BACKEND_DIR,
     DISCLAIMER,
@@ -256,6 +257,13 @@ def generate_daily_video(
         check=True,
     )
     print(f"  saved to output/{saved_name}")
+
+    srt_sentences = [
+        (c["text"], c["startFrame"] / REMOTION_FPS, c["endFrame"] / REMOTION_FPS)
+        for c in captions
+    ]
+    srt_path = write_srt(srt_sentences, saved_path.with_suffix(".srt"))
+    print(f"  captions saved to {srt_path.name}")
 
     hashtags_line = " ".join(hashtags)
     sidecar_text = (
