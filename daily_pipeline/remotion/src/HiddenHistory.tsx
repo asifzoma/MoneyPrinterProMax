@@ -31,14 +31,19 @@ const HEIGHT = 1920;
 const FPS = 30;
 const TITLE_DURATION = 60; // 2s
 const OUTRO_BUFFER = 15; // 0.5s tail after the last caption
+const CROSSFADE_FRAMES = 12; // 0.4s -- desired crossfade duration between images
 
 type Scene = {
   imageIndex: number;
   startFrame: number;
   endFrame: number;
-  captionIndices: number[];
 };
 
+// Groups captions into per-image scenes by caption index. Captions
+// themselves render separately, at their own absolute frame positions (see
+// HiddenHistoryComponent) -- kept independent of image timing so extending
+// image Sequences for the crossfade (buildImageSequences, below) never
+// shifts caption or audio sync.
 function buildScenes(captions: Caption[], imageCount: number): Scene[] {
   if (captions.length === 0 || imageCount === 0) return [];
   const scenes: Scene[] = [];
@@ -49,37 +54,93 @@ function buildScenes(captions: Caption[], imageCount: number): Scene[] {
       Math.floor((i / captions.length) * imageCount),
     );
     if (imageIndex !== currentImageIndex) {
-      scenes.push({
-        imageIndex,
-        startFrame: caption.startFrame,
-        endFrame: caption.endFrame,
-        captionIndices: [i],
-      });
+      scenes.push({ imageIndex, startFrame: caption.startFrame, endFrame: caption.endFrame });
       currentImageIndex = imageIndex;
     } else {
-      const scene = scenes[scenes.length - 1];
-      scene.endFrame = caption.endFrame;
-      scene.captionIndices.push(i);
+      scenes[scenes.length - 1].endFrame = caption.endFrame;
     }
   });
   return scenes;
 }
 
-const KenBurnsImage: React.FC<{ src: string; durationInFrames: number }> = ({
-  src,
-  durationInFrames,
-}) => {
+type ImageSequenceSpec = {
+  imageIndex: number;
+  from: number; // absolute frame, extended for the crossfade where applicable
+  durationInFrames: number; // extended to match
+  fadeInFrames: number; // 0 for the first image -- starts at full opacity
+  fadeOutFrames: number; // 0 for the last image -- stays at full opacity
+};
+
+// Extends each scene's image Sequence to straddle its neighboring
+// boundaries by half a crossfade window on each side, so two images render
+// simultaneously during the transition instead of hard-cutting. Each
+// boundary's crossfade is clamped to at most a third of the SHORTER of its
+// two neighboring scenes' own durations -- so even back-to-back short
+// scenes always keep at least a third of their own time at full opacity:
+// no negative/degenerate fades, and a scene's lead-in and lead-out fades
+// can never collide with each other.
+function buildImageSequences(scenes: Scene[]): ImageSequenceSpec[] {
+  const boundaryOverlap = scenes.slice(0, -1).map((scene, i) => {
+    const next = scenes[i + 1];
+    const shorter = Math.min(
+      scene.endFrame - scene.startFrame,
+      next.endFrame - next.startFrame,
+    );
+    return Math.max(0, Math.min(CROSSFADE_FRAMES, Math.floor(shorter / 3)));
+  });
+
+  return scenes.map((scene, i) => {
+    const leadIn = i > 0 ? Math.round(boundaryOverlap[i - 1] / 2) : 0;
+    const leadOut = i < scenes.length - 1 ? Math.round(boundaryOverlap[i] / 2) : 0;
+    return {
+      imageIndex: scene.imageIndex,
+      from: scene.startFrame - leadIn,
+      durationInFrames: scene.endFrame - scene.startFrame + leadIn + leadOut,
+      fadeInFrames: leadIn,
+      fadeOutFrames: leadOut,
+    };
+  });
+}
+
+const KenBurnsImage: React.FC<{
+  src: string;
+  durationInFrames: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+}> = ({ src, durationInFrames, fadeInFrames, fadeOutFrames }) => {
   const frame = useCurrentFrame();
-  const scale = interpolate(frame, [0, durationInFrames], [1, 1.15], {
+  const scale = interpolate(frame, [0, durationInFrames], [1, 1.25], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const translateX = interpolate(frame, [0, durationInFrames], [0, -20], {
+  const translateX = interpolate(frame, [0, durationInFrames], [0, -60], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
+
+  // Crossfade opacity: ramps in over fadeInFrames at the start, full
+  // opacity through the steady middle, ramps out over fadeOutFrames at the
+  // end. fadeInFrames/fadeOutFrames are 0 for the first/last image, so
+  // those two never ramp -- they start/stay at full opacity, matching the
+  // old hard-cut behavior at the very start and end of the sequence.
+  const opacityIn =
+    fadeInFrames > 0
+      ? interpolate(frame, [0, fadeInFrames], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
+      : 1;
+  const opacityOut =
+    fadeOutFrames > 0
+      ? interpolate(frame, [durationInFrames - fadeOutFrames, durationInFrames], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
+      : 1;
+  const opacity = Math.min(opacityIn, opacityOut);
+
   return (
-    <AbsoluteFill style={{ overflow: "hidden" }}>
+    <AbsoluteFill style={{ overflow: "hidden", opacity }}>
       <Img
         src={src}
         style={{
@@ -157,6 +218,7 @@ export const HiddenHistoryComponent: React.FC<HiddenHistoryProps> = ({
   captions,
 }) => {
   const scenes = buildScenes(captions, imagePaths.length);
+  const imageSequences = buildImageSequences(scenes);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
@@ -166,28 +228,25 @@ export const HiddenHistoryComponent: React.FC<HiddenHistoryProps> = ({
 
       <Sequence from={TITLE_DURATION}>
         <Audio src={staticFile(audioPath)} />
-        {scenes.map((scene, sceneIndex) => (
-          <Sequence
-            key={sceneIndex}
-            from={scene.startFrame}
-            durationInFrames={scene.endFrame - scene.startFrame}
-          >
+
+        {imageSequences.map((spec, i) => (
+          <Sequence key={`img-${i}`} from={spec.from} durationInFrames={spec.durationInFrames}>
             <KenBurnsImage
-              src={staticFile(imagePaths[scene.imageIndex])}
-              durationInFrames={scene.endFrame - scene.startFrame}
+              src={staticFile(imagePaths[spec.imageIndex])}
+              durationInFrames={spec.durationInFrames}
+              fadeInFrames={spec.fadeInFrames}
+              fadeOutFrames={spec.fadeOutFrames}
             />
-            {scene.captionIndices.map((captionIndex) => {
-              const caption = captions[captionIndex];
-              return (
-                <Sequence
-                  key={captionIndex}
-                  from={caption.startFrame - scene.startFrame}
-                  durationInFrames={caption.endFrame - caption.startFrame}
-                >
-                  <CaptionText text={caption.text} />
-                </Sequence>
-              );
-            })}
+          </Sequence>
+        ))}
+
+        {captions.map((caption, i) => (
+          <Sequence
+            key={`cap-${i}`}
+            from={caption.startFrame}
+            durationInFrames={caption.endFrame - caption.startFrame}
+          >
+            <CaptionText text={caption.text} />
           </Sequence>
         ))}
       </Sequence>

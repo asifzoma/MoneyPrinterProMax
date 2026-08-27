@@ -48,9 +48,11 @@ OBJECTS_STATE_FILE = PIPELINE_DIR / ".objects_state.json"
 WIKIPEDIA_USER_AGENT = "MoneyPrinterProMax-DailyPipeline/1.0 (personal project; no contact)"
 
 DISCLAIMER = (
-    "\n\nThis video is AI-narrated and grounded in the linked object's "
-    "Wikipedia summary, simplified for a short-form audience -- always a good "
-    "idea to check the source article if you want the full story."
+    "\n\nThis video is AI-narrated and AI-illustrated, grounded in the linked "
+    "Wikipedia sourcing and simplified for a short-form audience -- always a "
+    "good idea to check the source article if you want the full story. "
+    "Illustrations are original artistic interpretations, not real production "
+    "photos or footage."
 )
 
 YOUTUBE_PRIVACY_STATUS = os.environ.get("MP_YOUTUBE_PRIVACY", "unlisted")

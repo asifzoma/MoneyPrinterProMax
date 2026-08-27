@@ -1,6 +1,7 @@
 import re
 import os
 import json
+import anthropic
 from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
@@ -16,9 +17,21 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip(
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "180"))
 
+# Script/metadata generation goes through the Anthropic API (see
+# generate_response() below), not a local Ollama model -- Ollama proved
+# unreliable under memory pressure (timeouts/slow reloads on CPU-only
+# inference). list_ollama_models() and the Ollama client above are
+# unchanged and still power the MoneyPrinterProMax Flask app's /api/models
+# dropdown, which is a separate feature from generation.
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
 
 def _ollama_client() -> Client:
     return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+
+
+def _anthropic_client() -> anthropic.Anthropic:
+    return anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
 
 
 def _extract_model_name(model_obj) -> str:
@@ -66,12 +79,15 @@ def list_ollama_models() -> Tuple[List[str], str]:
 
 def generate_response(prompt: str, ai_model: str) -> str:
     """
-    Generate a script for a video, depending on the subject of the video.
+    Generate text via the Anthropic API (Claude).
 
     Args:
-        video_subject (str): The subject of the video.
-        ai_model (str): The AI model to use for generation.
-
+        prompt (str): The prompt to send to the model.
+        ai_model (str): Unused for the actual API call -- kept for call-site
+            compatibility with generate_script()/get_search_terms()/
+            generate_metadata()/generate_hashtags(), which all still pass an
+            Ollama-era model string (e.g. from MP_OLLAMA_MODEL). Generation
+            always uses ANTHROPIC_MODEL now.
 
     Returns:
 
@@ -79,62 +95,30 @@ def generate_response(prompt: str, ai_model: str) -> str:
 
     """
 
-    model_name = (ai_model or "").strip() or OLLAMA_MODEL
-
     try:
-        client = _ollama_client()
-        try:
-            response = client.chat(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                stream=False,
-            )
-        except ResponseError as err:
-            if err.status_code == 404:
-                try:
-                    response = client.generate(
-                        model=model_name, prompt=prompt, stream=False
-                    )
-                except ResponseError as fallback_err:
-                    if (
-                        fallback_err.status_code == 404
-                        and "not found" in str(fallback_err).lower()
-                    ):
-                        available_models, _ = list_ollama_models()
-                        available = (
-                            ", ".join(available_models) if available_models else "none"
-                        )
-                        raise RuntimeError(
-                            f"Ollama model '{model_name}' is not installed. Available models: {available}. "
-                            f"Install it with: ollama pull {model_name}"
-                        ) from fallback_err
-                    raise
-            else:
-                raise
-    except RuntimeError:
-        raise
-    except Exception as err:
-        raise RuntimeError(f"Failed to connect to Ollama: {err}") from err
+        response = _anthropic_client().messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=16000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.AuthenticationError as err:
+        raise RuntimeError(
+            f"Anthropic API authentication failed: {err}. Check ANTHROPIC_API_KEY in .env."
+        ) from err
+    except anthropic.RateLimitError as err:
+        raise RuntimeError(f"Anthropic API rate limited: {err}") from err
+    except anthropic.APIStatusError as err:
+        raise RuntimeError(f"Anthropic API error ({err.status_code}): {err.message}") from err
+    except anthropic.APIConnectionError as err:
+        raise RuntimeError(f"Failed to connect to the Anthropic API: {err}") from err
 
-    content = ""
-    if hasattr(response, "message") and getattr(response, "message") is not None:
-        message = getattr(response, "message")
-        if hasattr(message, "content") and getattr(message, "content"):
-            content = str(getattr(message, "content")).strip()
-        elif isinstance(message, dict):
-            content = str(message.get("content") or "").strip()
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to generate a response for this prompt.")
+
+    content = "".join(block.text for block in response.content if block.type == "text").strip()
 
     if not content:
-        if hasattr(response, "response") and getattr(response, "response"):
-            content = str(getattr(response, "response")).strip()
-        elif isinstance(response, dict):
-            content = (
-                str(response.get("message", {}).get("content") or "")
-                or str(response.get("response") or "")
-            ).strip()
-
-    if not content:
-        raise RuntimeError("Ollama returned an empty response.")
+        raise RuntimeError("Anthropic API returned an empty response.")
 
     return content
 

@@ -24,6 +24,7 @@ daily_pipeline/token.json
 daily_pipeline/tracker.csv
 daily_pipeline/logs/
 daily_pipeline/.objects_state.json
+daily_pipeline/.almost_movies_state.json
 daily_pipeline/temp/
 daily_pipeline/remotion/node_modules/
 daily_pipeline/remotion/public/tmp/

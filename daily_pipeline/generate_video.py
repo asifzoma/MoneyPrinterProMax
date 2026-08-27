@@ -1,16 +1,32 @@
-"""Generate today's "hidden histories of objects" video via Remotion.
+"""Generate today's "Almost Movie" video via Remotion.
 
-Orchestrates: fetch_topic (object + Wikipedia grounding) -> Ollama script/
-metadata/hashtags (Backend/gpt.py, called directly) -> TikTok TTS narration
-(Backend/tiktokvoice.py) -> Wikimedia Commons images (Backend/
-commons_search.py) -> Remotion render (daily_pipeline/remotion/) ->
-output/ + tracker.csv.
+Orchestrates: almost_movies_topics (unmade film or film conspiracy theory +
+Wikipedia grounding) -> Claude script/metadata/hashtags (Backend/gpt.py,
+called directly, via the Anthropic API) -> ElevenLabs TTS narration
+(elevenlabs_tts.py) -> AI-generated concept-art illustrations
+(illustration_gen.py, via fal.ai) -> Remotion render
+(daily_pipeline/remotion/) -> output/ + tracker.csv.
+
+Script/metadata generation used to run on a local Ollama model, and
+narration used to run through Backend/tiktokvoice.py's TikTok TTS proxy.
+Both were swapped out after real reliability problems: Ollama timed out
+under host memory pressure (CPU-only inference on a resource-constrained
+machine), and the TikTok TTS proxy (ottsy.weilbyte.dev) had an outright
+outage. Backend/gpt.py's swap to Anthropic lives in that shared module (it
+also affects the older Flask app); elevenlabs_tts.py is its own new module
+instead of editing Backend/tiktokvoice.py, since that module is shared with
+the older app and this swap is scoped to daily_pipeline.
+
+Formerly the "hidden histories of objects" pipeline (fetch_topic.py +
+Wikimedia Commons real-photo search via Backend/commons_search.py and
+Backend/video.py's download_image()) -- that concept is retired. Those
+modules are left in place (fetch_topic.py, commons_search.py) but are no
+longer imported here.
 
 No Flask, no job queue, no Docker -- that machinery exists to support
 MoneyPrinterProMax's multi-user web UI, which this single-video-a-day
-pipeline doesn't need. Backend/gpt.py, tiktokvoice.py, commons_search.py,
-and video.py's download_image() are all Flask-independent, so we import
-them directly.
+pipeline doesn't need. Backend/gpt.py is Flask-independent, so we import
+it directly.
 """
 
 import argparse
@@ -21,12 +37,14 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import tracker
+from almost_movies_topics import get_almost_movie
+from elevenlabs_tts import tts
+from illustration_gen import IllustrationError, generate_illustration
 from srt_export import write_srt
 from config import (
     BACKEND_DIR,
@@ -37,13 +55,9 @@ from config import (
     REMOTION_FPS,
     REMOTION_TMP_DIR,
 )
-from fetch_topic import get_daily_topic
 
 sys.path.insert(0, str(BACKEND_DIR))
-from commons_search import search_for_commons_images  # noqa: E402
-from gpt import generate_hashtags, generate_metadata, generate_script, get_search_terms  # noqa: E402
-from tiktokvoice import tts  # noqa: E402
-from video import download_image  # noqa: E402
+from gpt import generate_hashtags, generate_metadata, generate_script  # noqa: E402
 
 
 def _find_binary(name: str, glob_patterns: list[str]) -> str:
@@ -109,13 +123,13 @@ def generate_daily_video(
     ai_model: str = None,
     voice: str = "en_us_001",
     min_duration: int = 60,
-    max_images: int = 5,
+    max_images: int = 6,
 ) -> dict:
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
-    print("[1/6] Picking today's object...")
-    topic, meta = get_daily_topic()
-    print(f"  - {meta['object']} ({meta['wikipedia_url']})")
+    print("[1/6] Picking today's entry...")
+    topic, meta = get_almost_movie()
+    print(f"  - {meta['film']} [{meta['type']}] ({meta['wikipedia_url']})")
 
     print("\n[2/6] Generating script...")
     # Same min-duration word-count-targeting approach MoneyPrinterProMax's
@@ -126,7 +140,7 @@ def generate_daily_video(
     max_words = int(accept_words * 1.6)
     script = None
     for attempt in range(1, 4):
-        script = generate_script(topic, 4, ai_model, voice, "", min_words=target_words)
+        script = generate_script(topic, 6, ai_model, voice, "", min_words=target_words)
         word_count = len((script or "").split())
         if script and word_count >= accept_words:
             print(f"  script is {word_count} words (~{round(word_count / words_per_second)}s)")
@@ -147,53 +161,24 @@ def generate_daily_video(
             used += words_in
         script = " ".join(kept)
 
-    print("\n[3/6] Finding Wikimedia Commons images...")
-    llm_search_terms = get_search_terms(topic, max_images, script, ai_model)
-    # The object's own Wikipedia title is guaranteed to resolve to a real,
-    # on-topic article (that's what grounded the script) -- try it first,
-    # since the LLM's generated search terms are sometimes too narrative
-    # ("Percy Spencer Experiment") to match anything on Commons at all.
-    search_terms = [meta["wikipedia_title"]] + [
-        t for t in llm_search_terms if t.lower() != meta["wikipedia_title"].lower()
-    ]
-    image_candidates = []
-    seen_titles = set()
-    for i, term in enumerate(search_terms):
-        if i > 0:
-            time.sleep(1.5)  # pace requests so bursts don't trip Wikimedia's rate limiter
-        found = search_for_commons_images(term, 3)
-        for image in found:
-            if image["title"] not in seen_titles:
-                seen_titles.add(image["title"])
-                image_candidates.append(image)
-                break
-    if not image_candidates:
-        raise RuntimeError("No usable Wikimedia Commons images found.")
-
+    print("\n[3/6] Generating concept-art illustrations...")
     REMOTION_TMP_DIR.mkdir(parents=True, exist_ok=True)
     for old in REMOTION_TMP_DIR.glob("*"):
         old.unlink()
 
     image_rel_paths = []
-    image_credits = []
-    for i, image in enumerate(image_candidates):
-        if i > 0:
-            time.sleep(2)  # pace downloads so bursts don't trip Wikimedia's rate limiter
+    for scene_prompt in meta["scene_prompts"][:max_images]:
         try:
-            local_path = download_image(image["url"])
-            suffix = Path(local_path).suffix or ".jpg"
-            dest_name = f"img{i}{suffix}"
-            shutil.copy2(local_path, REMOTION_TMP_DIR / dest_name)
-            image_rel_paths.append(f"tmp/{dest_name}")
-            image_credits.append(image)
-        except Exception as err:
-            print(f"  [!] could not process image {image['url']}: {err}")
+            local_path = generate_illustration(scene_prompt, REMOTION_TMP_DIR)
+            image_rel_paths.append(f"tmp/{local_path.name}")
+        except IllustrationError as err:
+            print(f"  [!] could not generate illustration: {err}")
 
     if not image_rel_paths:
-        raise RuntimeError("Could not download any Wikimedia Commons images.")
-    print(f"  {len(image_rel_paths)} image(s) ready")
+        raise RuntimeError("Could not generate any illustrations.")
+    print(f"  {len(image_rel_paths)} illustration(s) ready")
 
-    print("\n[4/6] Generating narration (TikTok TTS)...")
+    print("\n[4/6] Generating narration (ElevenLabs)...")
     sentences = [s for s in script.split(". ") if s]
     tts_tmp_dir = PIPELINE_DIR / "temp"
     tts_tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -223,11 +208,6 @@ def generate_daily_video(
     title, description, keywords = generate_metadata(topic, script, ai_model)
     hashtags = generate_hashtags(topic, script, ai_model)
     description_with_disclaimer = description + DISCLAIMER
-    if image_credits:
-        credits_lines = "\n".join(
-            f"{c['artist']} ({c['license']}) - {c['source_page']}" for c in image_credits
-        )
-        description_with_disclaimer += f"\n\nImage credits:\n{credits_lines}"
 
     print("\n[6/6] Rendering with Remotion...")
     props = {
@@ -297,7 +277,7 @@ def generate_daily_video(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate today's hidden-histories-of-objects video.")
+    parser = argparse.ArgumentParser(description="Generate today's Almost Movie video.")
     parser.add_argument("--model", default=None, help="Ollama model (default: $MP_OLLAMA_MODEL or llama3.1:8b)")
     parser.add_argument("--voice", default="en_us_001")
     parser.add_argument("--min-duration", type=int, default=60)
