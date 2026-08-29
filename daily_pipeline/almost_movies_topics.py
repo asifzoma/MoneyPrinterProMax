@@ -81,6 +81,7 @@ FILMS = [
         "name": "Superman Lives",
         "wikipedia_title": "The Death of \"Superman Lives\": What Happened?",
         "section": None,
+        "hero_concept": "a reimagined Superman in a sleek black-and-silver battle suit, no cape, framed against a shattered Metropolis skyline with a colossal alien spider looming behind him",
         "scene_descriptions": [
             "an actor screen-testing in a metallic silver-and-black Kryptonian Superman battle suit, no red cape",
             "a colossal mechanical spider built as a movie prop, looming over a Hollywood soundstage",
@@ -95,6 +96,7 @@ FILMS = [
         "name": "Batgirl",
         "wikipedia_title": "Batgirl (film)",
         "section": None,
+        "hero_concept": "a caped vigilante in a purple-and-black suit crouched on a rain-soaked Gotham rooftop, city lights blazing below",
         "scene_descriptions": [
             "a caped superhero in a purple-and-black suit crouched on a rain-soaked city rooftop set",
             "a film crew standing beside sealed canisters of finished footage that was never released",
@@ -109,6 +111,7 @@ FILMS = [
         "name": "The Fantastic Four",
         "wikipedia_title": "The Fantastic Four (unreleased film)",
         "section": None,
+        "hero_concept": "four costumed heroes in blue silhouetted against a crumbling city skyline, one towering rock-textured figure standing among them",
         "scene_descriptions": [
             "actors in blue spandex superhero costumes on a cramped, low-budget soundstage",
             "a rubbery orange rock-textured superhero suit standing beside unfinished set flats",
@@ -123,6 +126,7 @@ FILMS = [
         "name": "At the Mountains of Madness",
         "wikipedia_title": "Guillermo del Toro's unrealized projects",
         "section": "At the Mountains of Madness",
+        "hero_concept": "a lone polar explorer dwarfed by a vast, impossible ancient city rising from the Antarctic ice under a blood-red sky",
         "scene_descriptions": [
             "explorers in early-20th-century polar expedition gear facing a vast buried alien city beneath Antarctic ice",
             "concept sketches of towering tentacled alien creatures pinned to a production office wall",
@@ -137,6 +141,7 @@ FILMS = [
         "name": "Justice League: Mortal",
         "wikipedia_title": "Justice League in other media",
         "section": "Justice League: Mortal (canceled)",
+        "hero_concept": "an ensemble of six silhouetted superheroes standing shoulder to shoulder against a stormy Australian sky",
         "scene_descriptions": [
             "a costume fitting room with an ensemble superhero team's suits displayed on mannequins",
             "a film set baking under harsh Australian sunlight, cameras packed away mid-shoot",
@@ -151,6 +156,7 @@ FILMS = [
         "name": "Kubrick's Napoleon",
         "wikipedia_title": "Stanley Kubrick's unrealized projects",
         "section": "Napoleon",
+        "hero_concept": "a solitary military commander on horseback surveying a vast battlefield of thousands of massed soldiers at dawn",
         "scene_descriptions": [
             "thousands of Napoleonic-era soldier extras massed in formation on a European battlefield film set",
             "meticulous early-19th-century military costume designs pinned across a research wall",
@@ -165,6 +171,7 @@ FILMS = [
         "name": "Jodorowsky's Dune",
         "wikipedia_title": "Jodorowsky's Dune",
         "section": None,
+        "hero_concept": "a robed figure standing before a surreal, towering desert palace built from impossible baroque geometry, twin moons overhead",
         "scene_descriptions": [
             "a surreal, psychedelic desert palace rendered in ornate baroque concept art",
             "an imagined imperial throne room built from impossible, dreamlike geometry",
@@ -179,6 +186,7 @@ FILMS = [
         "name": "Batman: Year One",
         "wikipedia_title": "Darren Aronofsky's unrealized projects",
         "section": "Batman: Year One",
+        "hero_concept": "a grim young vigilante in a crude home-made bat-costume silhouetted against a decaying, rain-slicked city skyline",
         "scene_descriptions": [
             "a grim young vigilante walking through a decaying, rain-slicked urban slum at night",
             "early sketches of a crude, home-made bat-costume assembled from scavenged gear",
@@ -193,6 +201,7 @@ FILMS = [
         "name": "The Man Who Killed Don Quixote",
         "wikipedia_title": "The Man Who Killed Don Quixote",
         "section": None,
+        "hero_concept": "a weathered knight in armor astride a horse against a churning storm-lit desert sky, windmills in the distance",
         "scene_descriptions": [
             "film equipment half-submerged after a sudden flash flood on a windswept desert set",
             "a knight in ornate, weathered armor astride a horse beneath a darkening storm sky",
@@ -207,6 +216,7 @@ FILMS = [
         "name": "Gambit",
         "wikipedia_title": "Gambit (unproduced film)",
         "section": None,
+        "hero_concept": "a trench-coated mutant hurling glowing energy-charged playing cards through a rain-soaked New Orleans street at night",
         "scene_descriptions": [
             "a card-throwing mutant in a long trench coat with glowing eyes on a New Orleans-style backlot",
             "a stack of glowing, energy-charged playing cards frozen mid-throw in concept art",
@@ -221,6 +231,7 @@ FILMS = [
         "name": "Silver & Black",
         "wikipedia_title": "Silver & Black (unproduced film)",
         "section": None,
+        "hero_concept": "two masked antiheroes in matching silver-and-black tactical suits standing back to back atop a rain-lit skyscraper",
         "scene_descriptions": [
             "two masked antiheroes in matching silver-and-black tactical suits on a rain-lit rooftop",
             "a costume design board split cleanly into silver and black color schemes",
@@ -235,6 +246,7 @@ FILMS = [
         "name": "The Dark Side of the Rainbow",
         "wikipedia_title": "The Dark Side of the Rainbow",
         "section": None,
+        "hero_concept": "a tornado-swept farmhouse rendered in prismatic, psychedelic color washes, as if a film reel and a vinyl record collided",
         "scene_descriptions": [
             "an old CRT television glowing in a dark room, showing a hazy tornado-swept farmhouse scene",
             "a vinyl record spinning beneath a beam of colored stage light",
@@ -249,6 +261,7 @@ FILMS = [
         "name": "The Shining",
         "wikipedia_title": "Moon landing conspiracy theories in popular culture",
         "section": "In film",
+        "hero_concept": "a lone figure in a vintage spacesuit standing at the end of an impossibly long, geometrically patterned hotel corridor",
         "scene_descriptions": [
             "a lone figure in a bulky vintage spacesuit standing in an eerily empty hotel corridor",
             "a hotel hallway with a dizzying geometric patterned carpet stretching into shadow",
@@ -263,6 +276,7 @@ FILMS = [
         "name": "Three Men and a Baby",
         "wikipedia_title": "Three Men and a Baby",
         "section": "Urban legend",
+        "hero_concept": "a shadowy silhouette behind a lace-curtained window in an ordinary suburban house, bathed in eerie afternoon light",
         "scene_descriptions": [
             "a shadowy human silhouette glimpsed behind lace curtains in a sunlit window",
             "a cardboard cutout figure in a tuxedo and top hat standing alone in an empty room",
@@ -277,6 +291,7 @@ FILMS = [
         "name": "The Blair Witch Project",
         "wikipedia_title": "The Blair Witch Project",
         "section": None,
+        "hero_concept": "a shaky, grainy view into a dense, twisted forest at dusk, stick figures barely visible hanging from distant branches",
         "scene_descriptions": [
             "a shaky handheld view of dark, tangled woods at dusk",
             "small stick figures bundled with twine, hanging from bare tree branches",
@@ -442,6 +457,26 @@ def build_conspiracy_topic(name: str, extract: str) -> str:
     )
 
 
+def build_hero_prompt(film_name: str, hero_concept: str) -> str:
+    """Build the poster-style hero-shot prompt for illustration_gen.generate_illustration().
+
+    Unlike build_scene_prompt(), which grounds each image on one specific
+    documented production detail, this frames the film's overall concept/
+    characters/setting as a single dramatic, cinematic hero image -- the
+    shot that opens the video and anchors it. Generated with fal.ai's
+    higher-quality Flux Pro model instead of Schnell (see generate_video.py).
+    """
+    return (
+        f"A dramatic, cinematic movie-poster-style hero shot for the film "
+        f"\"{film_name}\": {hero_concept}. Bold composition, striking "
+        f"lighting, epic movie-poster energy. This is an original artistic "
+        f"interpretation, imagined fresh purely from the film's concept, "
+        f"characters, and setting -- NOT a reproduction, homage, or "
+        f"reinterpretation of any real existing poster, marketing key art, "
+        f"or promotional image for this or any other film."
+    )
+
+
 def build_scene_prompt(film_name: str, scene_description: str) -> str:
     """Build one illustration prompt for illustration_gen.generate_illustration().
 
@@ -469,11 +504,13 @@ def _try_pool(pool: list[dict], pool_key: str, max_attempts: int, tried: list[st
         else:
             topic = build_topic(entry["name"], article["extract"])
         scene_prompts = [build_scene_prompt(entry["name"], desc) for desc in entry["scene_descriptions"]]
+        hero_prompt = build_hero_prompt(entry["name"], entry["hero_concept"])
         meta = {
             "film": entry["name"],
             "type": entry["type"],
             "wikipedia_title": article["title"],
             "wikipedia_url": article["url"],
+            "hero_prompt": hero_prompt,
             "scene_prompts": scene_prompts,
         }
         return topic, meta
@@ -482,7 +519,9 @@ def _try_pool(pool: list[dict], pool_key: str, max_attempts: int, tried: list[st
 
 def get_almost_movie(max_attempts: int = 5) -> tuple[str, dict]:
     """Returns (topic_string, meta) where meta has 'film', 'type'
-    ('collapsed' or 'conspiracy'), 'wikipedia_title', 'wikipedia_url', and
+    ('collapsed' or 'conspiracy'), 'wikipedia_title', 'wikipedia_url',
+    'hero_prompt' (str, the poster-style opening shot -- generate with
+    illustration_gen.generate_illustration(..., model="pro")), and
     'scene_prompts' (list[str], ready for illustration_gen.generate_illustration()).
 
     Every 3rd call (tracked via run_count in FILMS_STATE_FILE) picks from
@@ -519,6 +558,8 @@ if __name__ == "__main__":
     print(f"Today's pick ({meta['type']}): {meta['film']} ({meta['wikipedia_url']})")
     print("\nTopic string for script generation:\n")
     print(topic)
-    print("\nScene prompts:\n")
+    print("\nHero prompt (Flux Pro):\n")
+    print(f"  - {meta['hero_prompt']}")
+    print("\nScene prompts (Flux Schnell):\n")
     for p in meta["scene_prompts"]:
         print(f"  - {p}")

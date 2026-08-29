@@ -123,7 +123,7 @@ def generate_daily_video(
     ai_model: str = None,
     voice: str = "en_us_001",
     min_duration: int = 60,
-    max_images: int = 6,
+    max_images: int = 7,  # 1 poster-style hero shot (Flux Pro) + 6 scene shots (Flux Schnell)
 ) -> dict:
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
@@ -167,7 +167,13 @@ def generate_daily_video(
         old.unlink()
 
     image_rel_paths = []
-    for scene_prompt in meta["scene_prompts"][:max_images]:
+    try:
+        hero_path = generate_illustration(meta["hero_prompt"], REMOTION_TMP_DIR, model="pro")
+        image_rel_paths.append(f"tmp/{hero_path.name}")
+    except IllustrationError as err:
+        print(f"  [!] could not generate hero shot, opening with a scene shot instead: {err}")
+
+    for scene_prompt in meta["scene_prompts"][: max_images - 1]:
         try:
             local_path = generate_illustration(scene_prompt, REMOTION_TMP_DIR)
             image_rel_paths.append(f"tmp/{local_path.name}")

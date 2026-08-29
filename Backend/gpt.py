@@ -167,7 +167,26 @@ def generate_script(
 
             Do not under any circumstance reference this prompt in your response.
 
-            Get straight to the point, don't start with unnecessary things like, "welcome to this video".
+            STRUCTURE: Open with the single most shocking or consequential fact --
+            no throat-clearing, no scene-setting, no "let me tell you about..."
+            warm-up. Land that fact in the first sentence, then unpack how it
+            happened. Early on, plant one loose thread -- something you mention
+            but don't fully explain -- and pay it off later in the script; don't
+            resolve everything in the first breath. Partway through, not just in
+            the opening hook, work in a real reversal: a "but actually" beat
+            where the story flips on what was just said. Vary the rhythm on
+            purpose: let a short, blunt line sit next to a longer one that gives
+            a thought room to breathe, then snap back short again -- uniform
+            pacing reads like a list being read aloud. No filler, no padding, no
+            wasted words -- every sentence earns its place, whether it's three
+            words or twenty-five.
+
+            TONE: Sharp, confident, quick comic timing -- punchy comparisons, a
+            cheeky "here's what you missed" energy. Talk to the viewer directly
+            at least once -- a "you" moment, like you're telling a friend
+            something they need to know right now. Say the funny or surprising
+            thing in as few words as possible and move on -- don't explain the
+            joke, don't undercut the punch with hedging or throat-clearing.
 
             Obviously, the script should be related to the subject of the video.
 
