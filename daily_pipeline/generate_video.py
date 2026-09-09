@@ -122,8 +122,8 @@ def _concat_audio(mp3_paths: list[Path], output_path: Path) -> None:
 def generate_daily_video(
     ai_model: str = None,
     voice: str = "en_us_001",
-    min_duration: int = 60,
-    max_images: int = 7,  # 1 poster-style hero shot (Flux Pro) + 6 scene shots (Flux Schnell)
+    min_duration: int = 40,
+    max_images: int = 5,  # 1 poster-style hero shot (Flux Pro) + 4 scene shots (Flux Schnell)
 ) -> dict:
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
@@ -132,15 +132,19 @@ def generate_daily_video(
     print(f"  - {meta['film']} [{meta['type']}] ({meta['wikipedia_url']})")
 
     print("\n[2/6] Generating script...")
-    # Same min-duration word-count-targeting approach MoneyPrinterProMax's
-    # pipeline.py used: TikTok TTS speaks ~2.4 words/sec.
-    words_per_second = 2.4
-    accept_words = int(min_duration * words_per_second)
-    target_words = int(accept_words * 1.2)
-    max_words = int(accept_words * 1.6)
+    # ElevenLabs narration runs ~2.55 words/sec in practice (measured from
+    # prior renders -- faster and more consistent than the ~2.4 wps this was
+    # originally tuned for, back when narration ran through TikTok TTS).
+    # Targeting a tight 90-120 word band (~35-45s) instead of the old
+    # floor-only range, since completion rate -- the algorithm's strongest
+    # ranking signal -- has a lower ceiling on longer Shorts.
+    words_per_second = 2.55
+    accept_words = int(min_duration * words_per_second)  # 102: retry floor
+    target_words = int(accept_words * 1.05)  # 107: told to the model as its minimum
+    max_words = int(accept_words * 1.18)  # 120: hard cap, trims anything beyond
     script = None
     for attempt in range(1, 4):
-        script = generate_script(topic, 6, ai_model, voice, "", min_words=target_words)
+        script = generate_script(topic, 3, ai_model, voice, "", min_words=target_words, max_words=max_words)
         word_count = len((script or "").split())
         if script and word_count >= accept_words:
             print(f"  script is {word_count} words (~{round(word_count / words_per_second)}s)")
@@ -152,14 +156,27 @@ def generate_daily_video(
         raise RuntimeError("Could not generate a script. Try a different model.")
 
     if len(script.split()) > max_words:
-        kept, used = [], 0
-        for sentence in re.split(r"(?<=[.!?])\s+", script.strip()):
-            words_in = len(sentence.split())
-            if used + words_in > max_words and kept:
-                break
-            kept.append(sentence)
-            used += words_in
-        script = " ".join(kept)
+        sentences = re.split(r"(?<=[.!?])\s+", script.strip())
+        # Trimming front-to-back risks cutting off the payoff/button --
+        # exactly the beat the whole script was building toward -- to hit
+        # the word cap. Instead, always protect the hook (1st sentence) and
+        # the reversal/payoff/button (last 3 sentences), and only trim
+        # secondary detail out of the middle. If the script is too short to
+        # protect both ends, leave it alone rather than risk gutting either.
+        HOOK_KEEP, PAYOFF_KEEP = 1, 3
+        if len(sentences) > HOOK_KEEP + PAYOFF_KEEP:
+            head = sentences[:HOOK_KEEP]
+            tail = sentences[-PAYOFF_KEEP:]
+            middle = sentences[HOOK_KEEP:-PAYOFF_KEEP]
+            budget = max_words - sum(len(s.split()) for s in head + tail)
+            kept_middle, used = [], 0
+            for sentence in middle:
+                words_in = len(sentence.split())
+                if used + words_in > budget:
+                    break
+                kept_middle.append(sentence)
+                used += words_in
+            script = " ".join(head + kept_middle + tail)
 
     print("\n[3/6] Generating concept-art illustrations...")
     REMOTION_TMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -286,7 +303,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate today's Almost Movie video.")
     parser.add_argument("--model", default=None, help="Ollama model (default: $MP_OLLAMA_MODEL or llama3.1:8b)")
     parser.add_argument("--voice", default="en_us_001")
-    parser.add_argument("--min-duration", type=int, default=60)
+    parser.add_argument("--min-duration", type=int, default=40)
     args = parser.parse_args()
 
     try:

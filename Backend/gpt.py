@@ -130,6 +130,7 @@ def generate_script(
     voice: str,
     customPrompt: str,
     min_words: int = 0,
+    max_words: int = 0,
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -181,6 +182,21 @@ def generate_script(
             wasted words -- every sentence earns its place, whether it's three
             words or twenty-five.
 
+            LENGTH: This is a tight 35-45 second Short, not a mini-doc --
+            keep only the sharpest version of the hook and the payoff/twist,
+            and cut everything else: secondary details, extra examples, or
+            scene-setting that isn't essential to landing those two beats.
+            If you're tempted to list multiple separate incidents -- an
+            injury, then a delay, then a walkout, then a fire -- stop:
+            pick the single most dramatic one and cut the rest. One vivid
+            specific beats a catalog, and a catalog is what eats the whole
+            word budget before the payoff ever lands. The open-loop tease
+            and the mid-script reversal both still belong -- just compress
+            them down to their smallest form (the loose thread can be a
+            single clause, the reversal can land in one line) instead of
+            dropping them. If a sentence doesn't sharpen the hook or set up
+            the payoff, it doesn't survive.
+
             TONE: Sharp, confident, quick comic timing -- punchy comparisons, a
             cheeky "here's what you missed" energy. Talk to the viewer directly
             at least once -- a "you" moment, like you're telling a friend
@@ -206,8 +222,23 @@ def generate_script(
 
     # When a minimum length is requested, instruct the model to keep writing
     # until it reaches the target word count (drives the final video duration).
+    # When a maximum is also given, state it as a hard ceiling in the same
+    # breath -- a floor-only instruction ("at least X, don't stop early")
+    # reliably wins out over qualitative "keep it tight" guidance elsewhere
+    # in the prompt, so the model needs the range spelled out numerically to
+    # actually respect it instead of overshooting and relying on the
+    # post-hoc trim (which cuts from the end and risks lopping off the
+    # payoff on a hook-first-payoff-last script).
     if min_words and min_words > 0:
-        prompt += f"""
+        if max_words and max_words > min_words:
+            prompt += f"""
+    The script MUST be between {min_words} and {max_words} words long --
+    long enough to feel complete, short enough to stay tight. Do not pad it
+    out to hit the minimum. As you approach the maximum, wrap up with the
+    payoff instead of adding more detail or examples.
+    """
+        else:
+            prompt += f"""
     The script MUST be at least {min_words} words long. Keep writing engaging,
     on-topic narration until you reach that length. Do not stop early.
     """

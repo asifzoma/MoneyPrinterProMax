@@ -13,6 +13,15 @@ split: both models render the same STYLE_PREFIX. Both endpoints share the
 same request/response shape (image_size enum in, images[0].url out), so
 this is one function with a model switch, not two separate code paths.
 
+A real-poster image-to-image path (restyling a film's actual Wikipedia
+poster via fal.ai's flux/dev/image-to-image) was tried and rejected: live
+testing showed the real, legible movie title reproduced on a non-trivial
+fraction of generations regardless of prompt wording or how far the model
+was allowed to deviate from the source, which is a real risk for a channel
+that uploads unattended with no per-video human review. Real posters are
+described in words (see almost_movies_topics.FILMS' hero_concept entries)
+instead -- no real image ever reaches the generator.
+
 Requires FAL_KEY in .env (see .env.example). Get one at https://fal.ai/dashboard/keys.
 """
 
