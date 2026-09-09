@@ -29,7 +29,6 @@ export type HiddenHistoryProps = {
 const WIDTH = 1080;
 const HEIGHT = 1920;
 const FPS = 30;
-const TITLE_DURATION = 60; // 2s
 const OUTRO_BUFFER = 15; // 0.5s tail after the last caption
 const CROSSFADE_FRAMES = 12; // 0.4s -- desired crossfade duration between images
 
@@ -182,37 +181,9 @@ const CaptionText: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const TitleCard: React.FC<{ title: string }> = ({ title }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const pop = spring({ frame, fps, config: { damping: 12, stiffness: 140 } });
-  const fadeOut = interpolate(frame, [TITLE_DURATION - 15, TITLE_DURATION], [1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-  return (
-    <AbsoluteFill style={{ backgroundColor: "black", justifyContent: "center", alignItems: "center" }}>
-      <div
-        style={{
-          opacity: pop * fadeOut,
-          transform: `scale(${0.9 + pop * 0.1})`,
-          fontFamily: "sans-serif",
-          fontSize: 64,
-          fontWeight: 900,
-          color: "white",
-          textAlign: "center",
-          maxWidth: "85%",
-          lineHeight: 1.2,
-        }}
-      >
-        {title}
-      </div>
-    </AbsoluteFill>
-  );
-};
-
+// title is still accepted (generate_video.py still passes it in props) but
+// deliberately unused/unrendered -- no title card, straight into content.
 export const HiddenHistoryComponent: React.FC<HiddenHistoryProps> = ({
-  title,
   imagePaths,
   audioPath,
   captions,
@@ -222,34 +193,28 @@ export const HiddenHistoryComponent: React.FC<HiddenHistoryProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
-      <Sequence from={0} durationInFrames={TITLE_DURATION}>
-        <TitleCard title={title} />
-      </Sequence>
+      <Audio src={staticFile(audioPath)} />
 
-      <Sequence from={TITLE_DURATION}>
-        <Audio src={staticFile(audioPath)} />
+      {imageSequences.map((spec, i) => (
+        <Sequence key={`img-${i}`} from={spec.from} durationInFrames={spec.durationInFrames}>
+          <KenBurnsImage
+            src={staticFile(imagePaths[spec.imageIndex])}
+            durationInFrames={spec.durationInFrames}
+            fadeInFrames={spec.fadeInFrames}
+            fadeOutFrames={spec.fadeOutFrames}
+          />
+        </Sequence>
+      ))}
 
-        {imageSequences.map((spec, i) => (
-          <Sequence key={`img-${i}`} from={spec.from} durationInFrames={spec.durationInFrames}>
-            <KenBurnsImage
-              src={staticFile(imagePaths[spec.imageIndex])}
-              durationInFrames={spec.durationInFrames}
-              fadeInFrames={spec.fadeInFrames}
-              fadeOutFrames={spec.fadeOutFrames}
-            />
-          </Sequence>
-        ))}
-
-        {captions.map((caption, i) => (
-          <Sequence
-            key={`cap-${i}`}
-            from={caption.startFrame}
-            durationInFrames={caption.endFrame - caption.startFrame}
-          >
-            <CaptionText text={caption.text} />
-          </Sequence>
-        ))}
-      </Sequence>
+      {captions.map((caption, i) => (
+        <Sequence
+          key={`cap-${i}`}
+          from={caption.startFrame}
+          durationInFrames={caption.endFrame - caption.startFrame}
+        >
+          <CaptionText text={caption.text} />
+        </Sequence>
+      ))}
     </AbsoluteFill>
   );
 };
@@ -261,7 +226,7 @@ const calculateMetadata: CalculateMetadataFunction<HiddenHistoryProps> = ({
     ? props.captions[props.captions.length - 1].endFrame
     : 0;
   return {
-    durationInFrames: TITLE_DURATION + lastEnd + OUTRO_BUFFER,
+    durationInFrames: lastEnd + OUTRO_BUFFER,
   };
 };
 
@@ -270,7 +235,7 @@ export const HiddenHistory: React.FC = () => {
     <Composition
       id="HiddenHistory"
       component={HiddenHistoryComponent}
-      durationInFrames={TITLE_DURATION + OUTRO_BUFFER}
+      durationInFrames={OUTRO_BUFFER}
       fps={FPS}
       width={WIDTH}
       height={HEIGHT}

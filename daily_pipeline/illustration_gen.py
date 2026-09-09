@@ -3,13 +3,13 @@ object-history pipeline's real-photo Wikimedia Commons search
 (commons_search.py) now that every scene needs to depict something that was
 never actually filmed.
 
-Two models, two styles, picked together by the same `model` switch: Flux
-Schnell (fast/cheap, ~$0.003/image) rendering the moody/atmospheric
-STYLE_PREFIX for the bulk of a video's scene illustrations, and Flux Pro
-v1.1 (~$0.04/image) rendering the vibrant 60s-poster HERO_STYLE_PREFIX for
-the one hero/poster shot that opens each video -- higher quality worth the
-small extra cost for the shot that anchors the video, in a deliberately
-different, more eye-catching look than the rest. Both endpoints share the
+One style (STYLE_PREFIX, a pulp tabloid/exposé aesthetic) applied to every
+image in a video, rendered by one of two models picked via the `model`
+switch: Flux Schnell (fast/cheap, ~$0.003/image) for the bulk of a video's
+scene illustrations, and Flux Pro v1.1 (~$0.04/image) for the one hero shot
+that opens each video -- higher quality worth the small extra cost for the
+shot that anchors the video. That's a cost/quality choice, not a style
+split: both models render the same STYLE_PREFIX. Both endpoints share the
 same request/response shape (image_size enum in, images[0].url out), so
 this is one function with a model switch, not two separate code paths.
 
@@ -34,30 +34,16 @@ FAL_ENDPOINTS = {
 }
 
 STYLE_PREFIX = (
-    "Moody cinematic concept art, dramatic chiaroscuro lighting, a "
-    "desaturated color grade with one accent color, painterly digital "
-    "matte-painting brushwork, subtle 35mm film grain, widescreen framing, "
-    "an unfinished never-released production feel -- like a lost pitch-deck "
-    "painting for a movie that never got made. Atmospheric and evocative, "
-    "not literal. This is an original artistic interpretation only: do not "
-    "depict any specific real actor's likeness, any real leaked costume "
-    "photo, or any real production still -- invent the imagery from the "
-    "scene description alone."
-)
-
-# Used only for the hero/poster shot (model="pro") -- deliberately a
-# different, bolder look from STYLE_PREFIX's moody atmosphere, so the
-# opening shot reads as a poster, not just another concept-art frame.
-HERO_STYLE_PREFIX = (
-    "Vibrant 1960s movie-poster illustration style: bold saturated color, "
-    "hand-painted illustrated brushwork -- not photographic -- dramatic "
-    "diagonal composition, retro poster energy, like a golden-age "
-    "theatrical release poster brought to life. Bold and eye-catching, not "
-    "subtle. This is an original artistic interpretation only: do not "
-    "depict any specific real actor's likeness, and do not reproduce, "
-    "homage, or reinterpret any real existing movie poster, marketing key "
-    "art, or promotional image for this or any other film -- invent the "
-    "imagery from the scene description alone."
+    "Pulp tabloid exposé aesthetic: grainy halftone print texture, "
+    "high-contrast black-and-white or sepia tones, rough torn-newspaper "
+    "clipping edges, tabloid-headline energy -- like a scandalous "
+    "front-page photo from a sensationalist rag. Occasionally overlaid "
+    "with a bold red rubber-stamp reading CLASSIFIED, BANNED, or EXPOSED, "
+    "angled across the image. Gritty and dramatic, not polished or clean. "
+    "This is an original artistic interpretation only: do not depict any "
+    "specific real actor's likeness, any real leaked costume photo, or any "
+    "real production still -- invent the imagery from the scene "
+    "description alone."
 )
 
 
@@ -74,15 +60,13 @@ def generate_illustration(
     """Generate one concept-art illustration for `scene_prompt` and save it
     under `out_dir`. Returns the local path.
 
-    `scene_prompt` should describe one moment from the almost-made film
-    (e.g. "a costumed actor standing on a half-built alien city set") --
-    not a style prefix, which is prepended here automatically based on
-    `model`.
+    `scene_prompt` should describe one moment from the film (e.g. "a
+    costumed actor standing on a half-built alien city set") -- not
+    STYLE_PREFIX, which is prepended here automatically.
 
-    `model` is "schnell" (default, fast/cheap, moody/atmospheric
-    STYLE_PREFIX) or "pro" (fal.ai's Flux Pro v1.1, higher quality, ~13x
-    the cost, vibrant 60s-poster HERO_STYLE_PREFIX) -- use "pro" for the
-    one hero/poster shot per video, "schnell" for the rest.
+    `model` is "schnell" (default, fast/cheap) or "pro" (fal.ai's Flux Pro
+    v1.1, higher quality, ~13x the cost) -- use "pro" for the one hero shot
+    per video, "schnell" for the rest. Both render the same STYLE_PREFIX.
     """
     if not FAL_API_KEY:
         raise IllustrationError("FAL_KEY is not set. Add it to .env (see .env.example).")
@@ -91,8 +75,7 @@ def generate_illustration(
     if not endpoint:
         raise IllustrationError(f"Unknown fal.ai model {model!r}. Expected 'schnell' or 'pro'.")
 
-    style = HERO_STYLE_PREFIX if model == "pro" else STYLE_PREFIX
-    full_prompt = f"{style} Scene: {scene_prompt}"
+    full_prompt = f"{STYLE_PREFIX} Scene: {scene_prompt}"
 
     payload = {"prompt": full_prompt, "image_size": image_size, "num_images": 1}
     if model == "schnell":

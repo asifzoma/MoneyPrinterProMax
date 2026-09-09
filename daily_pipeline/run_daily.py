@@ -59,6 +59,19 @@ def main() -> int:
 
     if upload_result["status"] == "uploaded":
         log.info(f"Uploaded: {upload_result['youtube_url']}")
+
+        try:
+            import cleanup_output
+
+            removed = cleanup_output.cleanup_old_output()
+            if removed:
+                log.info(
+                    f"Cleaned up local files for {len(removed)} older upload(s): "
+                    f"{', '.join(removed)}"
+                )
+        except Exception as err:
+            log.warning(f"Output cleanup failed (upload still succeeded): {err}")
+
         log.info("=== Daily run completed successfully (generated + uploaded) ===")
         return 0
 
