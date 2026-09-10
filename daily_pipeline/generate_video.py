@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import tracker
-from almost_movies_topics import get_almost_movie
+from almost_movies_topics import FILMS, get_almost_movie
 from elevenlabs_tts import tts
 from illustration_gen import IllustrationError, generate_illustration
 from srt_export import write_srt
@@ -58,6 +58,96 @@ from config import (
 
 sys.path.insert(0, str(BACKEND_DIR))
 from gpt import generate_hashtags, generate_metadata, generate_script  # noqa: E402
+
+
+_TITLE_STOPWORDS = {"the", "a", "an", "of", "and", "or"}
+
+
+def _normalize_title(text: str) -> str:
+    """Lowercase and strip everything but letters/digits/spaces, so
+    punctuation, quoting, and capitalization differences don't cause a
+    false negative (e.g. "Three Men and a Baby" vs. "Three Men And A
+    Baby!")."""
+    return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
+
+
+def _significant_tokens(text: str) -> set[str]:
+    return {w for w in _normalize_title(text).split() if w not in _TITLE_STOPWORDS}
+
+
+def is_duplicate_film(film_name: str, tracker_rows: list[dict]) -> bool:
+    """True if `film_name` already appears in some previously-produced
+    video's title in tracker.csv.
+
+    This is a hard safety net independent of almost_movies_topics.py's own
+    rotation state -- it runs every time, regardless of whether that
+    rotation math is actually working correctly, since a rotation bug is
+    exactly what let a real duplicate ("Gambit") through before.
+
+    Every topic-builder function in almost_movies_topics.py (build_topic,
+    build_conspiracy_topic, build_disaster_topic) embeds the film's exact
+    `entry["name"]` in quotes in the topic sent to generate_script(), and
+    that name usually shows up verbatim in the catchy title
+    generate_metadata() produces from it -- confirmed against tracker.csv's
+    existing "Gambit" duplicate. But testing against two other already-
+    produced films turned up two ways a plain substring check misses a
+    real duplicate: generate_metadata() sometimes drops the film's leading
+    article ("The Wages of Fear" -> a title saying just "Wages of Fear")
+    or its subtitle ("Justice League: Mortal" -> a title saying just "The
+    Justice League Movie..."). So this checks two things: the full
+    (article-stripped) name as a substring first, since that's the
+    precise/common case; if that doesn't match, it falls back to requiring
+    at least 2 of the film name's significant words to appear in the
+    title, which catches a dropped article or subtitle without being
+    fooled by a single coincidentally shared word.
+    """
+    normalized_name = _normalize_title(film_name)
+    film_tokens = _significant_tokens(film_name)
+    if not normalized_name or not film_tokens:
+        return False
+
+    for row in tracker_rows:
+        title = row.get("Title", "")
+        normalized_title = _normalize_title(title)
+        if normalized_name in normalized_title:
+            return True
+        if len(film_tokens) >= 2 and len(film_tokens & _significant_tokens(title)) >= 2:
+            return True
+    return False
+
+
+def pick_fresh_topic(max_attempts: int = None) -> tuple[str, dict]:
+    """Draw a topic via get_almost_movie(), retrying against the next
+    rotation pick whenever the draw duplicates a film already in
+    tracker.csv. Raises RuntimeError (rather than ever returning a
+    duplicate) if the entire reachable pool is exhausted of fresh topics.
+    """
+    if max_attempts is None:
+        max_attempts = len(FILMS)
+
+    tracker_rows = tracker.read_rows()
+    tried_this_run = set()
+
+    for _ in range(max_attempts):
+        topic, meta = get_almost_movie()
+        film_name = meta["film"]
+
+        if film_name in tried_this_run:
+            continue  # already ruled out this run; don't re-check/re-log it
+        tried_this_run.add(film_name)
+
+        if is_duplicate_film(film_name, tracker_rows):
+            print(f"  [!] '{film_name}' already covered in tracker.csv -- skipping, drawing next...")
+            continue
+
+        return topic, meta
+
+    raise RuntimeError(
+        f"Exhausted {max_attempts} draws without finding a topic not already in "
+        f"tracker.csv (tried: {', '.join(sorted(tried_this_run))}). The reachable "
+        "pool appears fully covered -- add new entries to almost_movies_topics.py "
+        "before the next run rather than forcing a repeat."
+    )
 
 
 def _find_binary(name: str, glob_patterns: list[str]) -> str:
@@ -128,7 +218,7 @@ def generate_daily_video(
     ai_model = ai_model or os.environ.get("MP_OLLAMA_MODEL", "llama3.1:8b")
 
     print("[1/6] Picking today's entry...")
-    topic, meta = get_almost_movie()
+    topic, meta = pick_fresh_topic()
     print(f"  - {meta['film']} [{meta['type']}] ({meta['wikipedia_url']})")
 
     print("\n[2/6] Generating script...")
