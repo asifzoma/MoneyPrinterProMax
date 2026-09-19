@@ -758,6 +758,20 @@ def fetch_wikipedia_extract(title: str, section: str | None = None, max_chars: i
             return None
         full_text = full_text[match.start():]
 
+        # Stop at the next heading (any level) so the extract can't bleed
+        # into unrelated later sections of the same article -- verified
+        # live: without this, e.g. "Three Kings"' "Film techniques" section
+        # ran straight into the next section ("Conflicts") and picked up an
+        # unrelated real anecdote, which a compressed script latched onto
+        # as its entire subject instead of the section this entry was
+        # actually curated for.
+        own_heading_end = full_text.find("\n")
+        if own_heading_end == -1:
+            own_heading_end = len(full_text)
+        next_heading = re.search(r"\n[^\n]{1,80} =+\n", full_text[own_heading_end:])
+        if next_heading:
+            full_text = full_text[: own_heading_end + next_heading.start()]
+
     return {
         "title": page.get("title", title),
         "extract": full_text[:max_chars],
